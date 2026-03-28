@@ -25,7 +25,7 @@ pip install Pillow
 ## Usage
 
 ```bash
-python step3_click_to_mark.py
+python MapTool-tkinter.py
 ```
 
 ## Step-by-Step Learning

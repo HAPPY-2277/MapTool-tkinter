@@ -38,7 +38,8 @@ class MapQCApp:
         # 文件菜单
         file_menu = tk.Menu(menubar, tearoff=0)
         file_menu.add_command(label="Open", command=self.open_file, accelerator="Ctrl+O")
-        file_menu.add_command(label="Save", command=lambda:messagebox.showinfo("Message", "Function is under development"), accelerator="Ctrl+S")
+        file_menu.add_separator()
+        file_menu.add_command(label="Save Error", command=lambda:messagebox.showinfo("Message", "Function is under development"), accelerator="Ctrl+S")
         file_menu.add_separator()
         file_menu.add_command(label="Exit", command=self.root.quit)
         menubar.add_cascade(label="File", menu=file_menu)

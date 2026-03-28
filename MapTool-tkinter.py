@@ -65,7 +65,8 @@ class MapQCApp:
     def __init__(self, root):
         self.root = root
         self.root.title("空间数据质量检查工具")
-        self.root.geometry("1000x650")
+        self.root.geometry("900x600")
+        self.root.minsize(300, 200)
         
         # 数据存储
         self.current_image = None
@@ -74,6 +75,10 @@ class MapQCApp:
         self.errors = []           # 存储所有错误记录
         self.error_counter = 0     # 错误编号计数器
         self.is_marking_mode = False  # 是否处于标记模式
+        self.mouse_x, self.mouse_y = 0,0
+        self.img_x, self.img_y = 0,0
+        self.img_id = None
+        self.width, self.height = 0,0
         
         # 创建界面
         self._create_menu()
@@ -88,8 +93,7 @@ class MapQCApp:
         
         # 文件菜单
         file_menu = tk.Menu(menubar, tearoff=0)
-        file_menu.add_command(label="打开图片", command=self.open_image, accelerator="Ctrl+O")
-        file_menu.add_command(label="打开文本", command=self.open_text)
+        file_menu.add_command(label="打开图片", command=self.open_file, accelerator="Ctrl+O")
         file_menu.add_separator()
         file_menu.add_command(label="保存错误记录", command=self.save_errors, accelerator="Ctrl+S")
         file_menu.add_command(label="加载错误记录", command=self.load_errors)
@@ -118,13 +122,13 @@ class MapQCApp:
         toolbar.pack(side=tk.TOP, fill=tk.X)
         
         # 打开文件按钮
-        tk.Button(toolbar, text="📁 打开", command=self.open_image).pack(side=tk.LEFT, padx=2, pady=2)
+        tk.Button(toolbar, text="📁 打开", command=self.open_file,bg="#f4c542").pack(side=tk.LEFT, padx=2, pady=2)
         
         # 分隔线
         ttk.Separator(toolbar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=5, pady=2)
         
         # 标记模式按钮
-        self.mark_btn = tk.Button(toolbar, text="🔴 开始标记", command=self.toggle_marking_mode, bg="#ffcccc")
+        self.mark_btn = tk.Button(toolbar, text="🔴 开始标记", command=self.toggle_marking_mode, bg="#4caf50")
         self.mark_btn.pack(side=tk.LEFT, padx=2, pady=2)
         
         # 分隔线
@@ -229,6 +233,12 @@ class MapQCApp:
         
         # 绑定窗口大小变化事件
         self.canvas.bind("<Configure>", self._on_canvas_resize)
+
+        #绑定鼠标滚轮滚动事件
+        self.canvas.bind("<MouseWheel>", self._on_resize_image)
+
+        self.canvas.bind("<Button-3>", self._on_get_mouse_pos)
+        self.canvas.bind("<B3-Motion>", self._on_move_image)
     
     # ========== 核心功能方法 ==========
     
@@ -241,7 +251,7 @@ class MapQCApp:
             self.canvas.config(cursor="crosshair")  # 十字光标
             self.status_bar.config(text="标记模式已开启 | 点击图片上的位置标记错误")
         else:
-            self.mark_btn.config(text="🔴 开始标记", bg="#ffcccc")
+            self.mark_btn.config(text="🔴 开始标记", bg="#4caf50")
             self.canvas.config(cursor="arrow")
             self.status_bar.config(text="标记模式已关闭")
     
@@ -469,103 +479,104 @@ class MapQCApp:
             self.status_bar.config(text="已清除所有错误标记")
     
     # ========== 文件操作 ==========
-    
-    def open_image(self):
-        """打开图片文件"""
+
+    def open_file(self):
         file_path = filedialog.askopenfilename(
-            title="选择图片文件",
+            title="Choose File",
             filetypes=[
-                ("图片文件", "*.jpg *.jpeg *.png *.bmp *.tif *.tiff"),
-                ("所有文件", "*.*")
+                ("Picture or Text", "*.jpg *.jpeg *.png *.bmp *.tif *.tiff *.txt *.csv"),
+                ("All Files", "*.*")
             ]
         )
-        
         if not file_path:
             return
-        
+
+        ext = os.path.splitext(file_path)[1].lower()
+        if ext in ['.jpg', '.jpeg', '.png', '.bmp', '.tif', '.tiff']:
+            self.open_image(file_path)
+        else:
+            self.open_text(file_path)
+
+    def open_image(self, file_path):
         try:
+            # 使用PIL打开图片
             img = Image.open(file_path)
-            
+
+            # 获取Canvas大小
             self.canvas.update()
-            canvas_width = self.canvas.winfo_width()
-            canvas_height = self.canvas.winfo_height()
-            
+            self.canvas.update()
+            self.width, self.height = self.canvas.winfo_width(), self.canvas.winfo_height()
+
+            # 如果图片太大，按比例缩小
             img_width, img_height = img.size
-            scale = min(canvas_width / img_width, canvas_height / img_height, 1.0)
-            
+            scale = min(self.width / img_width, self.height / img_height, 1.0)
+
             if scale < 1.0:
                 new_width = int(img_width * scale)
                 new_height = int(img_height * scale)
                 img = img.resize((new_width, new_height), Image.LANCZOS)
-            
+
+            # 转换为tkinter可用的格式
             self.photo = ImageTk.PhotoImage(img)
-            
-            self.canvas.delete("hint")
-            self.canvas.delete("image")
-            
-            self.canvas.create_image(
-                canvas_width // 2, canvas_height // 2,
+
+            # 清除提示文字
+            self.canvas.delete(self.hint_text)
+
+            # 在Canvas中心显示图片
+            self.img_id=self.canvas.create_image(
+                self.width // 2, self.height // 2,
                 image=self.photo,
                 anchor=tk.CENTER,
                 tags="image"
             )
-            
+
+            # 保存当前图片信息
             self.current_image = img
             self.current_image_path = file_path
-            
-            self.status_bar.config(text=f"已打开: {os.path.basename(file_path)} | 尺寸: {img_width}x{img_height}")
-            
+            self.img_x, self.img_y = self.width // 2, self.height // 2
+
+            # 更新状态栏
+            self.status_bar.config(text=f"Already open: {file_path} | Size: {img_width}x{img_height}")
+
+            # 隐藏文本区域，显示Canvas
             self.text_frame.pack_forget()
             self.canvas.pack(fill=tk.BOTH, expand=True)
-            
+
         except Exception as e:
-            messagebox.showerror("错误", f"无法打开图片:\n{str(e)}")
-    
-    def open_text(self):
-        """打开文本文件"""
-        file_path = filedialog.askopenfilename(
-            title="选择文本文件",
-            filetypes=[("文本文件", "*.txt *.csv"), ("所有文件", "*.*")]
-        )
-        
-        if not file_path:
-            return
-        
+            messagebox.showerror("Error", f"Can't open the file:\n{str(e)}")
+
+    def open_text(self, file_path):
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-            
-            lines = content.split('\n')
-            numbered_content = ''
-            for i, line in enumerate(lines, 1):
-                numbered_content += f"{i:5d} | {line}\n"
-            
-            self.text_widget.delete(1.0, tk.END)
-            self.text_widget.insert(tk.END, numbered_content)
-            
-            self.canvas.pack_forget()
-            self.text_frame.pack(fill=tk.BOTH, expand=True)
-            
-            self.status_bar.config(text=f"已打开: {os.path.basename(file_path)} | 行数: {len(lines)}")
-            
+            self.get_text(file_path, 'utf-8')
         except UnicodeDecodeError:
+            # 尝试其他编码
             try:
-                with open(file_path, 'r', encoding='gbk') as f:
-                    content = f.read()
-                lines = content.split('\n')
-                numbered_content = ''
-                for i, line in enumerate(lines, 1):
-                    numbered_content += f"{i:5d} | {line}\n"
-                self.text_widget.delete(1.0, tk.END)
-                self.text_widget.insert(tk.END, numbered_content)
-                self.canvas.pack_forget()
-                self.text_frame.pack(fill=tk.BOTH, expand=True)
-                self.status_bar.config(text=f"已打开: {os.path.basename(file_path)} | 行数: {len(lines)}")
+                self.get_text(file_path, 'gbk')
             except Exception as e:
-                messagebox.showerror("错误", f"无法打开文件:\n{str(e)}")
+                messagebox.showerror("Error", f"Can't open the file:\n{str(e)}")
         except Exception as e:
-            messagebox.showerror("错误", f"无法打开文件:\n{str(e)}")
-    
+            messagebox.showerror("Error", f"Can't open the file:\n{str(e)}")
+
+    def get_text(self, file_path, codemode):
+        with open(file_path, 'r', encoding=codemode) as f:
+            content = f.read()
+        # 添加行号
+        lines = content.split('\n')
+        numbered_content = ''
+        for i, line in enumerate(lines, 1):
+            numbered_content += f"{i:5d} | {line}\n"
+
+        # 显示文本
+        self.text_widget.delete(1.0, tk.END)
+        self.text_widget.insert(tk.END, numbered_content)
+
+        # 隐藏Canvas，显示文本区域
+        self.canvas.pack_forget()
+        self.text_frame.pack(fill=tk.BOTH, expand=True)
+
+        # 更新状态栏
+        self.status_bar.config(text=f"Already open: {file_path} | lines: {len(lines)}")
+
     def save_errors(self):
         """保存错误记录到JSON文件"""
         if not self.errors:
@@ -688,11 +699,67 @@ class MapQCApp:
             messagebox.showerror("错误", f"导出失败:\n{str(e)}")
     
     def _on_canvas_resize(self, event):
-        """Canvas大小变化时重新居中图片"""
         if self.photo and self.current_image:
-            # 可以在这里实现图片重新居中的逻辑
-            pass
-    
+            dx=self.img_x-self.width//2
+            dy=self.img_y-self.height//2
+
+            self.canvas.update()
+            canvas_width = self.canvas.winfo_width()
+            canvas_height = self.canvas.winfo_height()
+
+            scale_x = canvas_width / self.width
+            scale_y = canvas_height / self.height
+
+            self.img_x=(int)(canvas_width//2 + scale_x * dx)
+            self.img_y=(int)(canvas_height//2 + scale_y * dy)
+
+            self.photo = ImageTk.PhotoImage(self.current_image)
+            self.img_id=self.canvas.create_image(
+                self.img_x,self.img_y,
+                image=self.photo,
+                anchor=tk.CENTER,
+                tags="image"
+            )
+            self.canvas.pack(fill=tk.BOTH, expand=True)
+            self.canvas.update()
+            self.width, self.height = self.canvas.winfo_width(), self.canvas.winfo_height()
+
+    def _on_resize_image(self, event):
+        delta = event.delta
+        scale = 1
+
+        if delta < 0:
+            scale /= 1.1
+        else:
+            scale *= 1.1
+
+        img_width, img_height = self.current_image.size
+        new_width = int(img_width * scale)
+        new_height = int(img_height * scale)
+
+        self.current_image = self.current_image.resize((new_width, new_height), Image.LANCZOS)
+        self.photo = ImageTk.PhotoImage(self.current_image)
+
+        self.canvas.delete(self.hint_text)
+        self.img_id=self.canvas.create_image(
+            self.img_x, self.img_y,
+            image=self.photo,
+            anchor=tk.CENTER,
+            tags="image"
+        )
+        self.canvas.pack(fill=tk.BOTH, expand=True)
+
+    def _on_get_mouse_pos(self, event):
+        self.mouse_x, self.mouse_y = event.x, event.y
+
+    def _on_move_image(self, event):
+        dx, dy = event.x - self.mouse_x, event.y - self.mouse_y
+
+        self.canvas.move(self.img_id, dx, dy)
+        self.mouse_x, self.mouse_y = event.x, event.y
+        self.img_x, self.img_y = self.img_x+dx, self.img_y+dy
+        pass
+
     def show_help(self):
         """显示使用说明"""
         help_text = """
@@ -732,7 +799,7 @@ Ctrl+S：保存错误记录
     
     def show_about(self):
         """显示关于对话框"""
-        messagebox.showinfo("关于", "空间数据质量检查工具 v1.0\n\n使用 tkinter 构建\n\n功能:\n- 加载图片和文本数据\n- 点击标记错误位置\n- 保存/加载错误记录\n- 导出检查报告")
+        messagebox.showinfo("关于", "空间数据质量检查工具 v3.0\n\n使用 tkinter 构建\n\n功能:\n- 加载图片和文本数据\n- 点击标记错误位置\n- 保存/加载错误记录\n- 导出检查报告")
 
 
 # ========== 程序入口 ==========
